@@ -89,7 +89,7 @@ def main():
                 print('Batch time : {:.4f}s'.format(time.time() - start))
 
         # save image
-        if len(curr_batch) == (BATCH_SIZE, remaining):
+        if len(curr_batch) == min(BATCH_SIZE, remaining):
             for i in range(BATCH_SIZE):
                 curr_output = output[i].data.squeeze().float().cpu().clamp_(0, 1).numpy()
                 if curr_output.ndim == 3:
