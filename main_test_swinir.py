@@ -90,7 +90,7 @@ def main():
 
         # save image
         if len(curr_batch) == min(BATCH_SIZE, remaining):
-            for i in range(BATCH_SIZE):
+            for i in range(len(curr_batch)):
                 curr_output = output[i].data.squeeze().float().cpu().clamp_(0, 1).numpy()
                 if curr_output.ndim == 3:
                     curr_output = np.transpose(curr_output[[2, 1, 0], :, :], (1, 2, 0))  # CHW-RGB to HCW-BGR
