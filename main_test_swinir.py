@@ -9,7 +9,9 @@ import requests
 
 from models.network_swinir import SwinIR as net
 from utils import util_calculate_psnr_ssim as util
+import time
 
+BATCH_SIZE = 128
 
 def main():
     parser = argparse.ArgumentParser()
@@ -56,12 +58,16 @@ def main():
     test_results['psnrb'] = []
     test_results['psnrb_y'] = []
     psnr, ssim, psnr_y, ssim_y, psnrb, psnrb_y = 0, 0, 0, 0, 0, 0
-
-    for idx, path in enumerate(sorted(glob.glob(os.path.join(folder, '*')))):
+    
+    files = list(sorted(glob.glob(os.path.join(folder, '*'))))
+    remaining = len(files)
+    for idx, path in enumerate(files):
         # read image
         imgname, img_lq, img_gt = get_image_pair(args, path)  # image to HWC-BGR, float32
         img_lq = np.transpose(img_lq if img_lq.shape[2] == 1 else img_lq[:, :, [2, 1, 0]], (2, 0, 1))  # HCW-BGR to CHW-RGB
         img_lq = torch.from_numpy(img_lq).float().unsqueeze(0).to(device)  # CHW-RGB to NCHW-RGB
+        curr_batch = []
+        curr_batch_names = []
 
         # inference
         with torch.no_grad():
@@ -71,15 +77,29 @@ def main():
             w_pad = (w_old // window_size + 1) * window_size - w_old
             img_lq = torch.cat([img_lq, torch.flip(img_lq, [2])], 2)[:, :, :h_old + h_pad, :]
             img_lq = torch.cat([img_lq, torch.flip(img_lq, [3])], 3)[:, :, :, :w_old + w_pad]
-            output = test(img_lq, model, args, window_size)
-            output = output[..., :h_old * args.scale, :w_old * args.scale]
+            if len(curr_batch) < BATCH_SIZE:
+                curr_batch.append(img_lq)
+                curr_batch_names.append(imgname)
+            
+            if len(curr_batch) == min(BATCH_SIZE, remaining):
+                img_lq = torch.cat(curr_batch, 0)
+                start = time.time()
+                output = test(img_lq, model, args, window_size)
+                output = output[..., :h_old * args.scale, :w_old * args.scale]
+                print('Batch time : {:.4f}s'.format(time.time() - start))
 
         # save image
-        output = output.data.squeeze().float().cpu().clamp_(0, 1).numpy()
-        if output.ndim == 3:
-            output = np.transpose(output[[2, 1, 0], :, :], (1, 2, 0))  # CHW-RGB to HCW-BGR
-        output = (output * 255.0).round().astype(np.uint8)  # float32 to uint8
-        cv2.imwrite(f'{save_dir}/{imgname}_SwinIR.png', output)
+        if len(curr_batch) == (BATCH_SIZE, remaining):
+            for i in range(BATCH_SIZE):
+                curr_output = output[i].data.squeeze().float().cpu().clamp_(0, 1).numpy()
+                if curr_output.ndim == 3:
+                    curr_output = np.transpose(curr_output[[2, 1, 0], :, :], (1, 2, 0))  # CHW-RGB to HCW-BGR
+                curr_output = (curr_output * 255.0).round().astype(np.uint8)  # float32 to uint8
+                cv2.imwrite(f'{save_dir}/{curr_batch_names[i]}_SwinIR.png', curr_output)
+            
+            remaining -= len(curr_batch)
+            curr_batch = []
+            curr_batch_names = []
 
         # evaluate psnr/ssim/psnr_b
         if img_gt is not None:
