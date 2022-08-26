@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 import socket
 import subprocess
-
+from tqdm import tqdm
 
 BATCH_SIZE = 64
 
@@ -77,7 +77,7 @@ def main():
         it = dset.samples[args.idx_range[0]:args.idx_range[1]]
     else:
         it = dset.samples
-    for idx, (path, _) in enumerate(it):
+    for idx, (path, _) in enumerate(tqdm(it)):
         # read image
         _, img_lq, img_gt = get_image_pair(args, path)  # image to HWC-BGR, float32
         imgname = '/'.join(path.split('/')[-2:])

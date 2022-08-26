@@ -6,6 +6,7 @@ import argparse
 from torchvision.datasets import ImageFolder
 import numpy as np
 import torch
+from pathlib import Path
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Launch main test swinir')
@@ -24,13 +25,20 @@ if __name__ == '__main__':
     num_idxs_per_proc = int(np.ceil(len(folder)/float(args.nprocs)))
     assert args.nprocs <= torch.cuda.device_count(), 'Number of processes is larger than the number of GPUs'
     
+    log_dir = Path(args.save_dir).parent / 'logs'
+    os.makedirs(log_dir, exist_ok=True)
     for i in range(args.nprocs):
-        proc_arr = ['python', 'main_test_swinir.py', '--task', 'real_sr', '--scale', str(args.scale), '--model_path', args.model_path, '--idx_range', str(i*num_idxs_per_proc), str((i+1)*num_idxs_per_proc), '--save_dir', args.save_dir, '--device_idx', str(i)]
-        if args.folder_lq is not None:
-            proc_arr += ['--folder_lq', args.folder_lq]
-        if args.folder_gt is not None:
-            proc_arr += ['--folder_gt', args.folder_gt]
-        if args.tile is not None:
-            proc_arr += ['--tile', str(args.tile)]
-        if i == 0:
-            proc_arr += ['--alert']
+        with open(log_dir / 'log_{}.out'.format(i), 'w') as fout, open(log_dir / 'log_{}.err'.format(i), 'w') as ferr:
+            proc_arr = ['python', 'main_test_swinir.py', '--task', 'real_sr', '--scale', str(args.scale), '--model_path', args.model_path, 
+                        '--idx_range', str(i*num_idxs_per_proc), str((i+1)*num_idxs_per_proc), '--save_dir', args.save_dir, '--device_idx', str(i)]
+            if args.folder_lq is not None:
+                proc_arr += ['--folder_lq', args.folder_lq]
+            if args.folder_gt is not None:
+                proc_arr += ['--folder_gt', args.folder_gt]
+            if args.tile is not None:
+                proc_arr += ['--tile', str(args.tile)]
+            if i == 0:
+                proc_arr += ['--alert']
+            proc = subprocess.Popen(proc_arr, stdout=fout, stderr=ferr)
+            print('Pid {} launched'.format(proc.pid))
+        
