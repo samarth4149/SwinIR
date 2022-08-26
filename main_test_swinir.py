@@ -6,12 +6,17 @@ from collections import OrderedDict
 import os
 import torch
 import requests
+from torchvision.datasets import ImageFolder
 
 from models.network_swinir import SwinIR as net
 from utils import util_calculate_psnr_ssim as util
 import time
+from pathlib import Path
+import socket
+import subprocess
 
-BATCH_SIZE = 128
+
+BATCH_SIZE = 64
 
 def main():
     parser = argparse.ArgumentParser()
@@ -30,9 +35,13 @@ def main():
     parser.add_argument('--folder_gt', type=str, default=None, help='input ground-truth test image folder')
     parser.add_argument('--tile', type=int, default=None, help='Tile size, None for no tile during testing (testing as a whole)')
     parser.add_argument('--tile_overlap', type=int, default=32, help='Overlapping of different tiles')
+    parser.add_argument('--idx_range', nargs=2, type=int, default=None, help='index range of test images')
+    parser.add_argument('--save_dir', type=str, default=None, help='save directory')
+    parser.add_argument('--device_idx', type=int, default=0)
+    parser.add_argument('--alert', action='store_true', help='alert when process is completed')
     args = parser.parse_args()
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(f'cuda:{args.device_idx}')
     # set up model
     if os.path.exists(args.model_path):
         print(f'loading model from {args.model_path}')
@@ -48,7 +57,8 @@ def main():
     model = model.to(device)
 
     # setup folder and path
-    folder, save_dir, border, window_size = setup(args)
+    folder, _, border, window_size = setup(args)
+    save_dir = args.save_dir
     os.makedirs(save_dir, exist_ok=True)
     test_results = OrderedDict()
     test_results['psnr'] = []
@@ -59,13 +69,19 @@ def main():
     test_results['psnrb_y'] = []
     psnr, ssim, psnr_y, ssim_y, psnrb, psnrb_y = 0, 0, 0, 0, 0, 0
     
-    files = list(sorted(glob.glob(os.path.join(folder, '*'))))
-    remaining = len(files)
+    dset = ImageFolder(folder)
+    remaining = len(dset)
     curr_batch = []
     curr_batch_names = []
-    for idx, path in enumerate(files):
+    if args.idx_range is not None:
+        it = dset.samples[args.idx_range[0]:args.idx_range[1]]
+    else:
+        it = dset.samples
+    for idx, (path, _) in enumerate(it):
         # read image
-        imgname, img_lq, img_gt = get_image_pair(args, path)  # image to HWC-BGR, float32
+        _, img_lq, img_gt = get_image_pair(args, path)  # image to HWC-BGR, float32
+        imgname = '/'.join(path.split('/')[-2:])
+        imgname = os.path.splitext(imgname)[0]
         img_lq = np.transpose(img_lq if img_lq.shape[2] == 1 else img_lq[:, :, [2, 1, 0]], (2, 0, 1))  # HCW-BGR to CHW-RGB
         img_lq = torch.from_numpy(img_lq).float().unsqueeze(0).to(device)  # CHW-RGB to NCHW-RGB
 
@@ -95,7 +111,9 @@ def main():
                 if curr_output.ndim == 3:
                     curr_output = np.transpose(curr_output[[2, 1, 0], :, :], (1, 2, 0))  # CHW-RGB to HCW-BGR
                 curr_output = (curr_output * 255.0).round().astype(np.uint8)  # float32 to uint8
-                cv2.imwrite(f'{save_dir}/{curr_batch_names[i]}_SwinIR.png', curr_output)
+                fname = f'{save_dir}/{curr_batch_names[i]}_SwinIR.png'
+                os.makedirs(Path(fname).parent, exist_ok=True)
+                cv2.imwrite(fname, curr_output)
             
             remaining -= len(curr_batch)
             curr_batch = []
@@ -143,6 +161,10 @@ def main():
             if args.task in ['color_jpeg_car']:
                 ave_psnrb_y = sum(test_results['psnrb_y']) / len(test_results['psnrb_y'])
                 print('-- Average PSNRB_Y: {:.2f} dB'.format(ave_psnrb_y))
+                
+    if args.alert:
+        hostname = socket.gethostname().split(".")[0]
+        proc = subprocess.run(['ntfy', 'send', f'"{hostname} processes done"'])
 
 
 def define_model(args):
