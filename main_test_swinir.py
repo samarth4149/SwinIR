@@ -16,7 +16,7 @@ import socket
 import subprocess
 from tqdm import tqdm
 
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 
 def main():
     parser = argparse.ArgumentParser()
